@@ -17,14 +17,14 @@
 typedef struct {
     int type;   // UFS_DIRECTORY or UFS_REGULAR
     int size;   // bytes
-    unsigned int direct[DIRECT_PTRS];
-} inode_t;
+    unsigned int direct[DIRECT_PTRS]; // pointers to blocks
+} inode_t; // each inode_t is 128 bytes?
 
 #define DIR_ENT_NAME_SIZE (28)
 typedef struct {
-    char name[DIR_ENT_NAME_SIZE];  // up to 28 bytes of name in directory (including \0)
+    char name[DIR_ENT_NAME_SIZE];  // up to 28 bytes of name in directory (including \0) entry name
     int  inum;      // inode number of entry
-} dir_ent_t;
+} dir_ent_t; // each dir_ent_t is 32 bytes?
 
 // presumed: block 0 is the super block
 typedef struct __super {
