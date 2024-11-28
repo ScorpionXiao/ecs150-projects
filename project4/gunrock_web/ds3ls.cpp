@@ -17,23 +17,23 @@ bool compareByName(const dir_ent_t& a, const dir_ent_t& b) {
 }
 
 int main(int argc, char *argv[]) {
-  if (argc != 3) {
-    cerr << argv[0] << ": diskImageFile directory" << endl;
-    cerr << "For example:" << endl;
-    cerr << "    $ " << argv[0] << " tests/disk_images/a.img /a/b" << endl;
-    return 1;
-  }
-  //./ds3ls tests/disk_images/a.img /
-  // #define UFS_ROOT_DIRECTORY_INODE_NUMBER (0)
-  // parse command line arguments
-  // for debug: gdbserver localhost:1234 ./ds3ls tests/disk_images/a.img /
-  Disk *disk = new Disk(argv[1], UFS_BLOCK_SIZE);
-  LocalFileSystem *fileSystem = new LocalFileSystem(disk);
-  string directory = string(argv[2]);
-  
-  int currentInodeNumber = UFS_ROOT_DIRECTORY_INODE_NUMBER;
+    if (argc != 3) {
+        cerr << argv[0] << ": diskImageFile directory" << endl;
+        cerr << "For example:" << endl;
+        cerr << "    $ " << argv[0] << " tests/disk_images/a.img /a/b" << endl;
+        return 1;
+    }
+    //./ds3ls tests/disk_images/a.img /
+    // #define UFS_ROOT_DIRECTORY_INODE_NUMBER (0)
+    // parse command line arguments
+    // for debug: gdbserver localhost:1234 ./ds3ls tests/disk_images/a.img /
+    Disk *disk = new Disk(argv[1], UFS_BLOCK_SIZE);
+    LocalFileSystem *fileSystem = new LocalFileSystem(disk);
+    string directory = string(argv[2]);
+    
+    int currentInodeNumber = UFS_ROOT_DIRECTORY_INODE_NUMBER;
 
-  size_t pos = 0;
+    size_t pos = 0;
     string delimiter = "/";
     while ((pos = directory.find(delimiter)) != string::npos) {
         string component = directory.substr(0, pos);
@@ -88,18 +88,15 @@ int main(int argc, char *argv[]) {
             //}
         }
 
-        // Sort the entries alphabetically by name
         sort(entries.begin(), entries.end(), compareByName);
 
-        // Print the sorted entries
         for (const auto &entry : entries) {
             cout << entry.inum << "\t" << entry.name << endl;
         }
     } else if (inode.type == UFS_REGULAR_FILE) {
-        // Handle files: Print the inode number and name
         cout << currentInodeNumber << "\t" << directory << endl;
     } else {
-        cerr << "Invalid directory or file type" << endl;
+        cerr << "Directory not found" << endl;
         delete fileSystem;
         delete disk;
         return 1;

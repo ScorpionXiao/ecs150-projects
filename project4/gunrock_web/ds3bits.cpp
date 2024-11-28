@@ -30,7 +30,36 @@ int main(int argc, char *argv[]) {
     cout << "num_data " << super.num_data << endl;
     cout << endl;
 
-    
+    cout << "Inode bitmap" <<endl;
+
+    int inodeMapSize = super.num_inodes / 8;
+    unsigned char *inodeBitMap = new unsigned char[inodeMapSize];
+    fileSystem->readInodeBitmap(&super, inodeBitMap);
+
+    for (int i = 0; i < inodeMapSize; i++) {
+      cout << (unsigned int) inodeBitMap[i] << " ";
+    }
+
+    cout << endl << endl;
+
+    delete[] inodeBitMap;
+
+    cout << "Data bitmap" <<endl;
+
+    int dataMapSize = super.num_data / 8;
+    unsigned char *dataBitMap = new unsigned char[dataMapSize];
+    fileSystem->readDataBitmap(&super, dataBitMap);
+
+    for (int i = 0; i < dataMapSize; i++) {
+      cout << (unsigned int) dataBitMap[i] << " ";
+    }
+
+    cout << endl;
+
+
+    delete[] dataBitMap;
+    delete fileSystem;
+    delete disk;
 
     return 0;
 }
