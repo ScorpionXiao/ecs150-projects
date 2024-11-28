@@ -62,7 +62,7 @@ void LocalFileSystem::readDataBitmap(super_t *super, unsigned char *dataBitmap) 
   for (int i = 0; i < super->data_bitmap_len; i++) {
     disk->readBlock(super->data_bitmap_addr, dataBitmap + i * UFS_BLOCK_SIZE);
   }
-}
+}// block allocate
 
 void LocalFileSystem::writeDataBitmap(super_t *super, unsigned char *dataBitmap) {
 }
@@ -77,6 +77,13 @@ void LocalFileSystem::readInodeRegion(super_t *super, inode_t *inodes) {
 void LocalFileSystem::writeInodeRegion(super_t *super, inode_t *inodes) {
 }
 
+// void readDataRegion(super_t *super, inode_t *inodes) {
+//   int data_len = super->data_region_len;
+//   int data_addr = super->data_region_addr;
+  
+  
+// }
+
 /**
    * Lookup an inode.
    *
@@ -89,43 +96,38 @@ void LocalFileSystem::writeInodeRegion(super_t *super, inode_t *inodes) {
    * Failure modes: invalid parentInodeNumber, name does not exist.
    */
 int LocalFileSystem::lookup(int parentInodeNumber, string name) {
-
-  //Need to load data to parentInode
   super_t super;
   readSuperBlock(&super);
 
-  inode_t *inodes = new inode_t[super.num_inodes];
-  readInodeRegion(&super, inodes);
-
-
-  inode_t parentInode = inodes[parentInodeNumber];
-
-  if (parentInode.type != UFS_DIRECTORY) {
-    delete[] inodes;
+  inode_t parentInode;
+  if (stat(parentInodeNumber, &parentInode) < 0) {
     return -EINVALIDINODE;
   }
 
+  if (parentInode.type != UFS_DIRECTORY) {
+    return -EINVALIDINODE;
+  }
 
-  for (int i = 0; i < DIRECT_PTRS; i++) {
-    if (parentInode.direct[i] == 0) {
-      continue;
-    }
+  char *buffer = new char[parentInode.size];
+  int bytesRead = read(parentInodeNumber, buffer, parentInode.size);
 
-    char dirBlock[UFS_BLOCK_SIZE];
-    disk->readBlock(parentInode.direct[i], dirBlock);
+  if (bytesRead < 0) {
+    delete[] buffer;
+    return -ENOTFOUND;
+  }
 
-    int numEntries = UFS_BLOCK_SIZE / sizeof(dir_ent_t);
-    for (int j = 0; j < numEntries; j++) {
-      dir_ent_t *entry = (dir_ent_t*)(dirBlock + j * sizeof(dir_ent_t));
+  int numEntries = parentInode.size / sizeof(dir_ent_t);
+  dir_ent_t *ent = (dir_ent_t *) buffer;
 
-      if (entry->inum != 0 && name == entry->name) {
-        delete[] inodes;
-        return entry->inum;
-      }
+  for (int i = 0; i < numEntries; i++) {
+    dir_ent_t entry = ent[i];
+    if (entry.inum != 0 && name == entry.name) {
+      delete[] buffer;
+      return entry.inum;
     }
   }
 
-  delete[] inodes;
+  delete[] buffer;
   return -ENOTFOUND;
 }
 
@@ -145,31 +147,25 @@ int LocalFileSystem::stat(int inodeNumber, inode_t *inode) {
   super_t super;
   readSuperBlock(&super);
 
-  // need to check inodeNumber-th number in bitmap
-  int bitmapSize = super.inode_bitmap_len * UFS_BLOCK_SIZE;
-  unsigned char *inodeBitmap = new unsigned char[bitmapSize];
-  readInodeBitmap(&super, inodeBitmap);
-
-  int byteIndex = inodeNumber / 8;
-  int bitIndex = inodeNumber % 8;
-
-  // check if Inode is allocated
-  if (!(inodeBitmap[byteIndex] & (1 << bitIndex))) {
-    delete[] inodeBitmap;
-    return -EINVALIDINODE;
+  //LocalFileSystem::read(int inodeNumber, void *buffer, int size)
+  //int inodesPerBlock = UFS_BLOCK_SIZE / sizeof(inode_t);
+  if (inodeNumber < 0 || inodeNumber >= super.num_inodes) {
+        return -EINVALIDINODE;
   }
 
+  // Locate the block and offset of the desired inode
   int inodesPerBlock = UFS_BLOCK_SIZE / sizeof(inode_t);
   int blockNumber = super.inode_region_addr + (inodeNumber / inodesPerBlock);
   int offset = (inodeNumber % inodesPerBlock) * sizeof(inode_t);
 
+  // Read the block containing the inode
   char inodeBlock[UFS_BLOCK_SIZE];
   disk->readBlock(blockNumber, inodeBlock);
 
+  // Extract the inode from the block
   memcpy(inode, inodeBlock + offset, sizeof(inode_t));
-
-  delete[] inodeBitmap;
   return 0;
+
 }
 
 
@@ -188,46 +184,37 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
   super_t super;
   readSuperBlock(&super);
 
-  int bitmapSize = super.inode_bitmap_len * UFS_BLOCK_SIZE;
-  unsigned char *inodeBitmap = new unsigned char[bitmapSize];
-  readInodeBitmap(&super, inodeBitmap);
-
-  int byteIndex = inodeNumber / 8;
-  int bitIndex = inodeNumber % 8;
-
-  // check if Inode is allocated
-  if (!(inodeBitmap[byteIndex] & (1 << bitIndex))) {
-    delete[] inodeBitmap;
+   inode_t inode;
+  if (stat(inodeNumber, &inode) < 0) {
     return -EINVALIDINODE;
   }
 
-  delete[] inodeBitmap;
+  if (size <= 0 || size > inode.size) {
+    size = inode.size;
+  }
 
-  int inodesPerBlock = UFS_BLOCK_SIZE / sizeof(inode_t);
-  int blockNumber = super.inode_region_addr + (inodeNumber / inodesPerBlock);
-  int offset = (inodeNumber % inodesPerBlock) * sizeof(inode_t);
-
-  char inodeBlock[UFS_BLOCK_SIZE];
-  disk->readBlock(blockNumber, inodeBlock);
-
-  inode_t inode;
-  memcpy(&inode, inodeBlock + offset, sizeof(inode_t));
+  
 
   int bytesRead = 0;
-  char *outputBuffer = (char *)buffer;
+  int blockIndex = 0; // Start with the first block
+  int posInBytes = 0;
 
-  for (int i = 0; i < DIRECT_PTRS && bytesRead < size; i++) {
-    if (inode.direct[i] == 0) {
-      continue;
-    }
+  while (bytesRead < size && blockIndex < DIRECT_PTRS) {
+    // if (inode.direct[blockIndex] == 0) {
+    //   break;
+    // }
 
-    char dataBlock[UFS_BLOCK_SIZE];
-    disk->readBlock(inode.direct[i], dataBlock);
+    char blockData[UFS_BLOCK_SIZE];
+    disk->readBlock(inode.direct[blockIndex], blockData);
 
-    int bytesToRead = std::min(UFS_BLOCK_SIZE, size - bytesRead);
+    int offset = posInBytes % UFS_BLOCK_SIZE;
+    int bytesToCopy = std::min(UFS_BLOCK_SIZE - offset, size - bytesRead);
 
-    memcpy(outputBuffer + bytesRead, dataBlock, bytesToRead);
-    bytesRead += bytesToRead;
+    memcpy((char *)buffer + bytesRead, blockData + offset, bytesToCopy);
+
+    bytesRead += bytesToCopy;
+    posInBytes += bytesToCopy;
+    blockIndex++;
   }
 
   return bytesRead;

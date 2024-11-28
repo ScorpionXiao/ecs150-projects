@@ -1,7 +1,7 @@
 all: gunrock_web mkfs ds3ls ds3cat ds3bits ds3mkdir ds3cp ds3touch ds3rm
 
 CC = g++
-CFLAGS = -g -Werror -Wall -I include -I shared/include -fsanitize=address
+CFLAGS = -g -Werror -Wall -I include -I shared/include
 LDFLAGS = -pthread
 VPATH = shared
 

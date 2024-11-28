@@ -11,12 +11,10 @@
 
 using namespace std;
 
-/*
-  Use this function with std::sort for directory entries
+// Use this function with std::sort for directory entries
 bool compareByName(const dir_ent_t& a, const dir_ent_t& b) {
     return std::strcmp(a.name, b.name) < 0;
 }
-*/
 
 int main(int argc, char *argv[]) {
   if (argc != 3) {
@@ -35,6 +33,34 @@ int main(int argc, char *argv[]) {
   
   int currentInodeNumber = UFS_ROOT_DIRECTORY_INODE_NUMBER;
 
+  size_t pos = 0;
+    string delimiter = "/";
+    while ((pos = directory.find(delimiter)) != string::npos) {
+        string component = directory.substr(0, pos);
+        directory.erase(0, pos + delimiter.length());
+        if (!component.empty()) {
+            int nextInode = fileSystem->lookup(currentInodeNumber, component);
+            if (nextInode < 0) {
+                cerr << "Directory not found" << endl;
+                delete fileSystem;
+                delete disk;
+                return 1;
+            }
+            currentInodeNumber = nextInode;
+        }
+    }
+
+    if (!directory.empty()) {
+        int nextInode = fileSystem->lookup(currentInodeNumber, directory);
+        if (nextInode < 0) {
+            cerr << "Directory not found" << endl;
+            delete fileSystem;
+            delete disk;
+            return 1;
+        }
+        currentInodeNumber = nextInode;
+    }
+
   inode_t inode;
   if (fileSystem->stat(currentInodeNumber, &inode) < 0) {
     cerr << "Directory not found" << endl;
@@ -42,21 +68,46 @@ int main(int argc, char *argv[]) {
     delete disk;
     return 1;
   }
-  //inode.type = Directory
-  //inode.size = 96
-  //inode.direct[0] = 6
 
-  int lookup = fileSystem->lookup(currentInodeNumber, ".");
-  cout << lookup << endl;
-  char buffer[inode.size];
-  if (fileSystem->read(currentInodeNumber, buffer, inode.size) < 0) {
-    cerr << "Directory not found" << endl;
+  if (inode.type == UFS_DIRECTORY) {
+        char buffer[inode.size];
+        if (fileSystem->read(currentInodeNumber, buffer, UFS_BLOCK_SIZE) < 0) {
+            cerr << "Directory not found" << endl;
+            delete fileSystem;
+            delete disk;
+            return 1;
+        }
+
+        vector<dir_ent_t> entries;
+        int numEntries = inode.size / sizeof(dir_ent_t);
+
+        for (int i = 0; i < numEntries; i++) {
+            dir_ent_t *entry = (dir_ent_t *)(buffer + i * sizeof(dir_ent_t));
+            //if (entry->inum != 0) {  // Valid entries
+            entries.push_back(*entry);
+            //}
+        }
+
+        // Sort the entries alphabetically by name
+        sort(entries.begin(), entries.end(), compareByName);
+
+        // Print the sorted entries
+        for (const auto &entry : entries) {
+            cout << entry.inum << "\t" << entry.name << endl;
+        }
+    } else if (inode.type == UFS_REGULAR_FILE) {
+        // Handle files: Print the inode number and name
+        cout << currentInodeNumber << "\t" << directory << endl;
+    } else {
+        cerr << "Invalid directory or file type" << endl;
+        delete fileSystem;
+        delete disk;
+        return 1;
+    }
+
+    // Cleanup
     delete fileSystem;
     delete disk;
-    return 1;
-  }
 
-
-
-  return 0;
+    return 0;
 }
