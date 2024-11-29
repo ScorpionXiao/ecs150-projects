@@ -17,12 +17,27 @@ int main(int argc, char *argv[]) {
   }
 
   // Parse command line arguments
-  /*
+  
   Disk *disk = new Disk(argv[1], UFS_BLOCK_SIZE);
   LocalFileSystem *fileSystem = new LocalFileSystem(disk);
   int parentInode = stoi(argv[2]);
   string directory = string(argv[3]);
-  */
-  
+
+  super_t super;
+  fileSystem->readSuperBlock(&super);
+
+  int inodeNumber = fileSystem->create(parentInode, 0, directory);
+
+  if (inodeNumber >= 0 && inodeNumber <= super.num_inodes) {
+    delete disk;
+    delete fileSystem;
+    return 0;
+  } else {
+    cerr << "Error creating directory" << endl;
+    delete disk;
+    delete fileSystem;
+    return 1;
+  }
+
   return 0;
 }

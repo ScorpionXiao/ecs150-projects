@@ -34,7 +34,7 @@ inode_t: each inode is 128 bytes
 
 
 
-for debug: gdbserver localhost:1234 ./
+for debug: gdbserver localhost:1234 ./ds3mkdir tests/disk_images/a.img 0 hi.txt
 
 */
 
@@ -55,16 +55,10 @@ void LocalFileSystem::readInodeBitmap(super_t *super, unsigned char *inodeBitmap
   }
 }
 
-void LocalFileSystem::writeInodeBitmap(super_t *super, unsigned char *inodeBitmap) {
-}
-
 void LocalFileSystem::readDataBitmap(super_t *super, unsigned char *dataBitmap) {
   for (int i = 0; i < super->data_bitmap_len; i++) {
     disk->readBlock(super->data_bitmap_addr, dataBitmap + i * UFS_BLOCK_SIZE);
   }
-}// block allocate
-
-void LocalFileSystem::writeDataBitmap(super_t *super, unsigned char *dataBitmap) {
 }
 
 void LocalFileSystem::readInodeRegion(super_t *super, inode_t *inodes) {
@@ -74,7 +68,27 @@ void LocalFileSystem::readInodeRegion(super_t *super, inode_t *inodes) {
   }
 }
 
+
+
+
+
+void LocalFileSystem::writeInodeBitmap(super_t *super, unsigned char *inodeBitmap) {
+  for (int i = 0; i < super->inode_bitmap_len; i++) {
+    disk->writeBlock(super->inode_bitmap_addr + i, inodeBitmap + (i * UFS_BLOCK_SIZE));
+  }
+}
+
+void LocalFileSystem::writeDataBitmap(super_t *super, unsigned char *dataBitmap) {
+  for (int i = 0; i < super->data_bitmap_len; i++) {
+    disk->writeBlock(super->data_bitmap_addr + i, dataBitmap + (i * UFS_BLOCK_SIZE));
+  }
+}
+
 void LocalFileSystem::writeInodeRegion(super_t *super, inode_t *inodes) {
+  int inodesPerBlock = UFS_BLOCK_SIZE / sizeof(inode_t);
+  for (int i = 0; i < super->inode_region_len; i++) {
+    disk->writeBlock(super->inode_region_addr + i, inodes + (i * inodesPerBlock));
+  }
 }
 
 // void readDataRegion(super_t *super, inode_t *inodes) {
@@ -153,16 +167,13 @@ int LocalFileSystem::stat(int inodeNumber, inode_t *inode) {
         return -EINVALIDINODE;
   }
 
-  // Locate the block and offset of the desired inode
   int inodesPerBlock = UFS_BLOCK_SIZE / sizeof(inode_t);
   int blockNumber = super.inode_region_addr + (inodeNumber / inodesPerBlock);
   int offset = (inodeNumber % inodesPerBlock) * sizeof(inode_t);
 
-  // Read the block containing the inode
   char inodeBlock[UFS_BLOCK_SIZE];
   disk->readBlock(blockNumber, inodeBlock);
 
-  // Extract the inode from the block
   memcpy(inode, inodeBlock + offset, sizeof(inode_t));
   return 0;
 
@@ -184,7 +195,7 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
   super_t super;
   readSuperBlock(&super);
 
-   inode_t inode;
+  inode_t inode;
   if (stat(inodeNumber, &inode) < 0) {
     return -EINVALIDINODE;
   }
@@ -220,15 +231,205 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
   return bytesRead;
 }
 
+/**
+   * Makes a file or directory.
+   *
+   * Makes a file (type == UFS_REGULAR_FILE) or directory (type == UFS_DIRECTORY)
+   * in the parent directory specified by parentInodeNumber of name name.
+   * 
+   * For create calls, you'll need to allocate both an inode and a disk block for
+   * directories. If you have allocated one of these entities but can't allocate
+   * the other, make sure you free allocated inodes or disk blocks before returning 
+   * an error from the call.
+   *
+   * Success: return the inode number of the new file or directory
+   * Failure: -EINVALIDINODE, -EINVALIDNAME, -EINVALIDTYPE, -ENOTENOUGHSPACE.
+   * Failure modes: parentInodeNumber does not exist or is not a directory, or
+   * name is too long. If name already exists and is of the correct type,
+   * return success, but if the name already exists and is of the wrong type,
+   * return an error.
+   */
 int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
-  return 0;
+  super_t super;
+  readSuperBlock(&super);
+
+  inode_t parentInode;
+  if (stat(parentInodeNumber, &parentInode) < 0) {
+    return -EINVALIDINODE;
+  }
+
+  if (parentInode.type == UFS_REGULAR_FILE) {
+    return -EINVALIDTYPE;
+  }
+
+  if (name.empty() || name.length() >= DIR_ENT_NAME_SIZE) {
+    return -EINVALIDNAME;
+  }
+
+  int inodeMapSize = UFS_BLOCK_SIZE / 8;
+  unsigned char *inodeBitMap = new unsigned char[inodeMapSize];
+  readInodeBitmap(&super, inodeBitMap);
+
+  // check available inode
+  int newInodeNumber = -1;
+  for (int i = 0; i < super.num_inodes; i++) {
+    if (!(inodeBitMap[i / 8] & (1 << (i % 8)))) {
+      newInodeNumber = i;
+      // inodeBitMap[i / 8] |= (1 << (i % 8));
+      break;
+    }
+  }
+
+  int dataMapSize = UFS_BLOCK_SIZE / 8;
+  unsigned char *dataBitMap = new unsigned char[dataMapSize];
+  readDataBitmap(&super, dataBitMap);
+
+  int newBlockNumber = -1;
+  for (int i = 0; i < super.num_data; i++) {
+    if (!(dataBitMap[i / 8] & (1 << (i % 8)))) {
+      newBlockNumber = i;
+      // dataBitMap[i / 8] |= (1 << (i % 8));
+      break;
+    }
+  }
+
+  if (newInodeNumber == -1 || newBlockNumber == -1) {
+    delete[] inodeBitMap;
+    delete[] dataBitMap;
+    return ENOTENOUGHSPACE;
+  }
+
+  // inodeBitMap[newInodeNumber / 8] |= (1 << (newInodeNumber % 8));
+  // dataBitMap[newBlockNumber / 8] |= (1 << (newBlockNumber % 8));
+
+  inode_t *inodes = new inode_t[super.num_inodes];
+  readInodeRegion(&super, inodes);
+
+  inode_t &newInode = inodes[newInodeNumber];
+  memset(&newInode, 0, sizeof(inode_t));
+  newInode.type = type;
+  newInode.size = 0;
+  if (type == UFS_DIRECTORY) {
+    char dirBlock[UFS_BLOCK_SIZE];
+    memset(dirBlock, 0, UFS_BLOCK_SIZE);
+
+    dir_ent_t *entries = (dir_ent_t *)dirBlock;
+    strncpy(entries[0].name, ".", DIR_ENT_NAME_SIZE);
+    entries[0].inum = newInodeNumber;
+    strncpy(entries[1].name, "..", DIR_ENT_NAME_SIZE);
+    entries[1].inum = parentInodeNumber;
+
+    newInode.size = 2 *sizeof(dir_ent_t);
+    disk->writeBlock(newInode.direct[0], dirBlock);
+  }
+
+  char parentDirBlock[UFS_BLOCK_SIZE];
+  disk->readBlock(parentInode.direct[0], parentDirBlock);
+
+  dir_ent_t *parentEntries = (dir_ent_t *)parentDirBlock;
+
+  for (int i = 0; i < 32; i++) {
+    if (strcmp(parentEntries[i].name, name.c_str()) == 0) {
+      inode_t existingInode;
+      if (stat(parentEntries[i].inum, &existingInode) < 0) {
+        delete[] inodeBitMap;
+        delete[] dataBitMap;
+        delete[] inodes;
+        return -EINVALIDINODE;
+      }
+
+      if (existingInode.type == type) {
+        delete[] inodeBitMap;
+        delete[] dataBitMap;
+        delete[] inodes;
+        return parentEntries[i].inum;
+
+      } else {
+        delete[] inodeBitMap;
+        delete[] dataBitMap;
+        delete[] inodes;
+        return -EINVALIDTYPE;
+      }
+    }
+  }
+
+  bool foundEmptySlot = false;
+  for (int i = 0; i < 32; i++) {
+    if (parentEntries[i].inum == 0) {
+      strncpy(parentEntries[i].name, name.c_str(), DIR_ENT_NAME_SIZE);
+      parentEntries[i].inum = newInodeNumber;
+      foundEmptySlot = true;
+      break;
+    }
+  }
+
+  if (!foundEmptySlot) {
+    delete[] inodeBitMap;
+    delete[] dataBitMap;
+    delete[] inodes;
+    return -ENOTENOUGHSPACE;
+  }
+
+  inodeBitMap[newInodeNumber / 8] |= (1 << (newInodeNumber % 8));
+  dataBitMap[newBlockNumber / 8] |= (1 << (newBlockNumber % 8));
+
+  parentInode.size += sizeof(dir_ent_t);
+  disk->writeBlock(parentInode.direct[0], parentDirBlock);
+
+  writeInodeRegion(&super, inodes);
+  writeInodeBitmap(&super, inodeBitMap);
+  writeDataBitmap(&super, dataBitMap);
+
+  delete[] inodeBitMap;
+  delete[] dataBitMap;
+  delete[] inodes;
+  return newInodeNumber;
 }
 
+/**
+   * Write the contents of a file.
+   *
+   * Writes a buffer of size to the file, replacing any content that
+   * already exists.
+   *
+   * Success: number of bytes written
+   * Failure: -EINVALIDINODE, -EINVALIDSIZE, -EINVALIDTYPE.
+   * Failure modes: invalid inodeNumber, invalid size, not a regular file
+   * (because you can't write to directories).
+   */
 int LocalFileSystem::write(int inodeNumber, const void *buffer, int size) {
+  super_t super;
+  readSuperBlock(&super);
+
+  inode_t inode;
+  if (stat(inodeNumber, &inode) < 0) {
+    return -EINVALIDINODE;
+  }
+
   return 0;
 }
 
+/**
+   * Remove a file or directory.
+   *
+   * Removes the file or directory name from the directory specified by
+   * parentInodeNumber.
+   *
+   * Success: 0
+   * Failure: -EINVALIDINODE, -EDIRNOTEMPTY, -EINVALIDNAME, -EUNLINKNOTALLOWED
+   * Failure modes: parentInodeNumber does not exist or isn't a directory,
+   * directory is NOT empty, or the name is invalid. Note that the name not
+   * existing is NOT a failure by our definition. You can't unlink '.' or '..'
+   */
 int LocalFileSystem::unlink(int parentInodeNumber, string name) {
+  super_t super;
+  readSuperBlock(&super);
+
+  inode_t parentInode;
+  if (stat(parentInodeNumber, &parentInode) < 0) {
+    return -EINVALIDINODE;
+  }
+
   return 0;
 }
 

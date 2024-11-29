@@ -55,14 +55,14 @@ int main(int argc, char *argv[]) {
     int absoluteBlockNumber = inode.direct[i];
     int relativeBlockNumber = absoluteBlockNumber - super.data_region_addr;
 
-    if (relativeBlockNumber < 0 || relativeBlockNumber > super.data_region_len) {
+    if (relativeBlockNumber < 0 || relativeBlockNumber > super.data_region_len) { // skip out of bound blocknumber
       continue;
     }
 
     int byteIndex = relativeBlockNumber / 8;
     int bitIndex = relativeBlockNumber % 8;
 
-    if (!(dataBitmap[byteIndex] & (1 << bitIndex))) {
+    if (!(dataBitmap[byteIndex] & (1 << bitIndex))) { //skip unallocated block
       continue;
     }
 

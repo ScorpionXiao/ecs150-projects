@@ -16,7 +16,7 @@
 
 typedef struct {
     int type;   // UFS_DIRECTORY or UFS_REGULAR
-    int size;   // bytes
+    int size;   // bytes, indicating the number of entries inside of this inode entriesNum = inode.size / sizeof(dir_ent_t)
     unsigned int direct[DIRECT_PTRS]; // pointers to blocks
 } inode_t; // each inode_t is 128 bytes?
 
