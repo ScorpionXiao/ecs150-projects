@@ -32,11 +32,11 @@ int main(int argc, char *argv[]) {
 
     cout << "Inode bitmap" <<endl;
 
-    int inodeMapSize = super.num_inodes / 8;
+    int inodeMapSize = UFS_BLOCK_SIZE;
     unsigned char *inodeBitMap = new unsigned char[inodeMapSize];
     fileSystem->readInodeBitmap(&super, inodeBitMap);
 
-    for (int i = 0; i < inodeMapSize; i++) {
+    for (int i = 0; i < super.num_inodes / 8; i++) {
       cout << (unsigned int) inodeBitMap[i] << " ";
     }
 
@@ -46,11 +46,11 @@ int main(int argc, char *argv[]) {
 
     cout << "Data bitmap" <<endl;
 
-    int dataMapSize = super.num_data / 8;
+    int dataMapSize = UFS_BLOCK_SIZE;
     unsigned char *dataBitMap = new unsigned char[dataMapSize];
     fileSystem->readDataBitmap(&super, dataBitMap);
 
-    for (int i = 0; i < dataMapSize; i++) {
+    for (int i = 0; i < super.num_data / 8; i++) {
       cout << (unsigned int) dataBitMap[i] << " ";
     }
 

@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
 
   int inodeNumber = fileSystem->create(parentInode, 0, directory);
 
-  if (inodeNumber >= 0 && inodeNumber <= super.num_inodes) {
+  if (inodeNumber >= 0 && inodeNumber < super.num_inodes) {
     delete disk;
     delete fileSystem;
     return 0;
@@ -38,6 +38,7 @@ int main(int argc, char *argv[]) {
     delete fileSystem;
     return 1;
   }
-
+  delete disk;
+  delete fileSystem;
   return 0;
 }

@@ -57,7 +57,7 @@ void LocalFileSystem::readInodeBitmap(super_t *super, unsigned char *inodeBitmap
 
 void LocalFileSystem::readDataBitmap(super_t *super, unsigned char *dataBitmap) {
   for (int i = 0; i < super->data_bitmap_len; i++) {
-    disk->readBlock(super->data_bitmap_addr, dataBitmap + i * UFS_BLOCK_SIZE);
+    disk->readBlock(super->data_bitmap_addr + i, dataBitmap + i * UFS_BLOCK_SIZE);
   }
 }
 
@@ -258,17 +258,43 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
     return -EINVALIDINODE;
   }
 
-  if (parentInode.type == UFS_REGULAR_FILE) {
+  if (parentInode.type != UFS_DIRECTORY) {
     return -EINVALIDTYPE;
   }
 
-  if (name.empty() || name.length() >= DIR_ENT_NAME_SIZE) {
+  if (name.empty() || name.length() > DIR_ENT_NAME_SIZE) {
     return -EINVALIDNAME;
   }
 
-  int inodeMapSize = UFS_BLOCK_SIZE / 8;
+  char parentDirBlock[UFS_BLOCK_SIZE];
+  disk->readBlock(parentInode.direct[0], parentDirBlock);
+
+  dir_ent_t *parentEntries = (dir_ent_t *)parentDirBlock;
+
+  for (int i = 0; i < parentInode.size / 32; i++) { 
+    if (strcmp(parentEntries[i].name, name.c_str()) == 0) {
+      inode_t existingInode;
+      if (stat(parentEntries[i].inum, &existingInode) < 0) {
+        return -EINVALIDINODE;
+      }
+
+      if (existingInode.type == type) {
+        return parentEntries[i].inum;
+
+      } else {
+        return -EINVALIDTYPE;
+      }
+    }
+  }
+
+  int inodeMapSize = UFS_BLOCK_SIZE;
   unsigned char *inodeBitMap = new unsigned char[inodeMapSize];
   readInodeBitmap(&super, inodeBitMap);
+
+  if (!(inodeBitMap[parentInodeNumber / 8] & (1 << (parentInodeNumber % 8)))) {
+    delete[] inodeBitMap;
+    return -EINVALIDINODE;
+  }
 
   // check available inode
   int newInodeNumber = -1;
@@ -279,24 +305,24 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
       break;
     }
   }
-
-  int dataMapSize = UFS_BLOCK_SIZE / 8;
+  
+  int dataMapSize = UFS_BLOCK_SIZE;
   unsigned char *dataBitMap = new unsigned char[dataMapSize];
   readDataBitmap(&super, dataBitMap);
 
-  int newBlockNumber = -1;
+  int newDataBlockNumber = -1;
   for (int i = 0; i < super.num_data; i++) {
     if (!(dataBitMap[i / 8] & (1 << (i % 8)))) {
-      newBlockNumber = i;
+      newDataBlockNumber = i;
       // dataBitMap[i / 8] |= (1 << (i % 8));
       break;
     }
   }
 
-  if (newInodeNumber == -1 || newBlockNumber == -1) {
+  if (newInodeNumber == -1 || newDataBlockNumber == -1 || newInodeNumber >= super.num_inodes || newDataBlockNumber >= super.num_data) {
     delete[] inodeBitMap;
     delete[] dataBitMap;
-    return ENOTENOUGHSPACE;
+    return -ENOTENOUGHSPACE;
   }
 
   // inodeBitMap[newInodeNumber / 8] |= (1 << (newInodeNumber % 8));
@@ -309,6 +335,8 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
   memset(&newInode, 0, sizeof(inode_t));
   newInode.type = type;
   newInode.size = 0;
+  newInode.direct[0] = newDataBlockNumber + super.data_region_addr;
+
   if (type == UFS_DIRECTORY) {
     char dirBlock[UFS_BLOCK_SIZE];
     memset(dirBlock, 0, UFS_BLOCK_SIZE);
@@ -323,59 +351,24 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
     disk->writeBlock(newInode.direct[0], dirBlock);
   }
 
-  char parentDirBlock[UFS_BLOCK_SIZE];
-  disk->readBlock(parentInode.direct[0], parentDirBlock);
-
-  dir_ent_t *parentEntries = (dir_ent_t *)parentDirBlock;
-
-  for (int i = 0; i < 32; i++) {
-    if (strcmp(parentEntries[i].name, name.c_str()) == 0) {
-      inode_t existingInode;
-      if (stat(parentEntries[i].inum, &existingInode) < 0) {
-        delete[] inodeBitMap;
-        delete[] dataBitMap;
-        delete[] inodes;
-        return -EINVALIDINODE;
-      }
-
-      if (existingInode.type == type) {
-        delete[] inodeBitMap;
-        delete[] dataBitMap;
-        delete[] inodes;
-        return parentEntries[i].inum;
-
-      } else {
-        delete[] inodeBitMap;
-        delete[] dataBitMap;
-        delete[] inodes;
-        return -EINVALIDTYPE;
-      }
-    }
-  }
-
-  bool foundEmptySlot = false;
-  for (int i = 0; i < 32; i++) {
-    if (parentEntries[i].inum == 0) {
-      strncpy(parentEntries[i].name, name.c_str(), DIR_ENT_NAME_SIZE);
-      parentEntries[i].inum = newInodeNumber;
-      foundEmptySlot = true;
-      break;
-    }
-  }
-
-  if (!foundEmptySlot) {
+  int entryIndex = parentInode.size / 32;
+  if (entryIndex > 127) {
     delete[] inodeBitMap;
     delete[] dataBitMap;
     delete[] inodes;
     return -ENOTENOUGHSPACE;
   }
+  
+  strncpy(parentEntries[entryIndex].name, name.c_str(), DIR_ENT_NAME_SIZE);
+  parentEntries[entryIndex].inum = newInodeNumber;
 
   inodeBitMap[newInodeNumber / 8] |= (1 << (newInodeNumber % 8));
-  dataBitMap[newBlockNumber / 8] |= (1 << (newBlockNumber % 8));
+  dataBitMap[newDataBlockNumber / 8] |= (1 << (newDataBlockNumber % 8));
 
   parentInode.size += sizeof(dir_ent_t);
   disk->writeBlock(parentInode.direct[0], parentDirBlock);
-
+  
+  inodes[parentInodeNumber] = parentInode;
   writeInodeRegion(&super, inodes);
   writeInodeBitmap(&super, inodeBitMap);
   writeDataBitmap(&super, dataBitMap);
