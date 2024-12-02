@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -22,12 +23,56 @@ int main(int argc, char *argv[]) {
   }
 
   // Parse command line arguments
-  /*
+
   Disk *disk = new Disk(argv[1], UFS_BLOCK_SIZE);
   LocalFileSystem *fileSystem = new LocalFileSystem(disk);
   string srcFile = string(argv[2]);
   int dstInode = stoi(argv[3]);
-  */
-  
+
+  int fd = open(srcFile.c_str(), O_RDONLY);
+  if (fd < 0) {
+    cerr << "Could not write to dst_file" << endl;
+    delete fileSystem;
+    delete disk;
+    return 1;
+  }
+
+  struct stat fileStat;
+    if (fstat(fd, &fileStat) < 0) {
+      cerr << "Could not write to dst_file" << endl;
+      close(fd);
+      delete fileSystem;
+      delete disk;
+      return 1;
+    }
+
+  off_t fileSize = fileStat.st_size;
+
+  char *buffer = new char[fileSize];
+  ssize_t bytesRead = read(fd, buffer, fileSize);
+
+  if (bytesRead < 0) {
+    cerr << "Could not write to dst_file" << endl;
+    delete[] buffer;
+    close(fd);
+    delete fileSystem;
+    delete disk;
+    return 1;
+  }
+
+  int bytesWritten = fileSystem->write(dstInode, buffer, bytesRead);
+  if (bytesWritten < 0) {
+    cerr << "Could not write to dst_file" << endl;
+    delete[] buffer;
+    close(fd);
+    delete fileSystem;
+    delete disk;
+    return 1;
+  }
+
+  delete[] buffer;
+  close(fd);
+  delete fileSystem;
+  delete disk;
   return 0;
 }

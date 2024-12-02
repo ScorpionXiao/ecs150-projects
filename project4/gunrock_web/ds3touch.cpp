@@ -28,6 +28,8 @@ int main(int argc, char *argv[]) {
   int inodeNumber = fileSystem->create(parentInode, 1, fileName);
 
   if (inodeNumber >= 0 && inodeNumber < super.num_inodes) {
+    // inode_t inode;
+    // fileSystem->stat(inodeNumber, &inode);
     delete disk;
     delete fileSystem;
     return 0;

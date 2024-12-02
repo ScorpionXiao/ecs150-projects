@@ -28,11 +28,7 @@ int main(int argc, char *argv[]) {
 
   int inodeNumber = fileSystem->create(parentInode, 0, directory);
 
-  if (inodeNumber >= 0 && inodeNumber < super.num_inodes) {
-    delete disk;
-    delete fileSystem;
-    return 0;
-  } else {
+  if (inodeNumber < 0 || inodeNumber >= super.num_inodes) {
     cerr << "Error creating directory" << endl;
     delete disk;
     delete fileSystem;
