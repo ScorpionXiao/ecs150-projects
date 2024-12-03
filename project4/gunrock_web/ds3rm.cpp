@@ -30,6 +30,10 @@ int main(int argc, char *argv[]) {
     delete fileSystem;
     cerr << "Error removing entry" << endl;
     return 1;
+  } else {
+    delete disk;
+    delete fileSystem;
+    return 0;
   }
 
   delete disk;

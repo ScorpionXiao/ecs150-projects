@@ -50,8 +50,10 @@ int main(int argc, char *argv[]) {
   unsigned char *dataBitmap = new unsigned char[bitMapSize];
   fileSystem->readDataBitmap(&super, dataBitmap);
 
+  int blockUsed = (inode.size + 4095) / 4096;
+
   cout << "File blocks" << endl;
-  for (int i = 0; i < DIRECT_PTRS; i++) {
+  for (int i = 0; i < blockUsed; i++) {
     int absoluteBlockNumber = inode.direct[i];
     int relativeBlockNumber = absoluteBlockNumber - super.data_region_addr;
 

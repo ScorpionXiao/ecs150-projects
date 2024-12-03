@@ -88,13 +88,6 @@ void LocalFileSystem::writeInodeRegion(super_t *super, inode_t *inodes) {
   }
 }
 
-// void readDataRegion(super_t *super, inode_t *inodes) {
-//   int data_len = super->data_region_len;
-//   int data_addr = super->data_region_addr;
-  
-  
-// }
-
 /**
    * Lookup an inode.
    *
@@ -119,7 +112,9 @@ int LocalFileSystem::lookup(int parentInodeNumber, string name) {
     return -EINVALIDINODE;
   }
 
-  char *buffer = new char[parentInode.size];
+  int blockUsed = (parentInode.size + 4095) / 4096;
+  int size = blockUsed * UFS_BLOCK_SIZE;
+  char *buffer = new char[size];
   int bytesRead = read(parentInodeNumber, buffer, parentInode.size);
 
   if (bytesRead < 0) {
@@ -127,12 +122,12 @@ int LocalFileSystem::lookup(int parentInodeNumber, string name) {
     return -ENOTFOUND;
   }
 
-  int numEntries = parentInode.size / sizeof(dir_ent_t);
+  int entries = parentInode.size / sizeof(dir_ent_t);
   dir_ent_t *ent = (dir_ent_t *) buffer;
 
-  for (int i = 0; i < numEntries; i++) {
+  for (int i = 0; i < entries; i++) {
     dir_ent_t entry = ent[i];
-    if (entry.inum != 0 && name == entry.name) {
+    if (strcmp(entry.name, name.c_str()) == 0) {
       delete[] buffer;
       return entry.inum;
     }
@@ -207,13 +202,12 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
   }
 
   int bytesRead = 0;
-  int blockIndex = 0; // Start with the first block
+  int blockIndex = 0;
   int posInBytes = 0;
 
-  while (bytesRead < size && blockIndex < DIRECT_PTRS) {
-    // if (inode.direct[blockIndex] == 0) {
-    //   break;
-    // }
+  int blockUsed = (inode.size + 4095) / 4096;
+
+  while (bytesRead < size && blockIndex < blockUsed) {
 
     char blockData[UFS_BLOCK_SIZE];
     disk->readBlock(inode.direct[blockIndex], blockData);
@@ -486,7 +480,6 @@ int LocalFileSystem::write(int inodeNumber, const void *buffer, int size) {
     int absoluteBlockNumber = inode.direct[i];
     int relativeBlockNumber = absoluteBlockNumber - super.data_region_addr;
     if (relativeBlockNumber >= 0 && relativeBlockNumber < super.data_region_len) {
-      // inode.direct[i] = 0;
       dataBitMap[relativeBlockNumber / 8] &= ~(1 << (relativeBlockNumber % 8));
     }
   }
@@ -524,22 +517,26 @@ int LocalFileSystem::unlink(int parentInodeNumber, string name) {
     return -EINVALIDINODE;
   }
 
-  if (parentInodeNumber > super.num_inodes || parentInodeNumber < 0) {
+  // if parentinode is invalid
+  if (parentInodeNumber > super.num_inodes - 1 || parentInodeNumber < 0) {
     return -EINVALIDINODE;
   }
-
+  // if parentinode is invalid
   if (parentInode.type != UFS_DIRECTORY) {
     return -EINVALIDTYPE;
   }
 
+  // if parentinode is invalid
   if (parentInode.size < 96) {
     return -EINVALIDINODE;
   }
 
+  // if the name is a valid size
   if (name.empty() || name.length() > DIR_ENT_NAME_SIZE) {
     return -EINVALIDNAME;
   }
 
+  // if name is not . or ..
   if (strcmp(name.c_str(), ".") == 0 || strcmp(name.c_str(), "..") == 0) {
     return -EUNLINKNOTALLOWED;
   }
@@ -563,6 +560,7 @@ int LocalFileSystem::unlink(int parentInodeNumber, string name) {
     }
   }
 
+  // if name doesn't exist in parent inode (return 0 for success)
   if (entryIdx == -1) {
     delete[] parentDirBuffer;
     return 0;
@@ -574,6 +572,7 @@ int LocalFileSystem::unlink(int parentInodeNumber, string name) {
     return -EINVALIDINODE;
   }
 
+  // check if directory is empty
   if (inode.type == UFS_DIRECTORY && inode.size > 64) {
     delete[] parentDirBuffer;
     return -EDIRNOTEMPTY;
@@ -581,7 +580,7 @@ int LocalFileSystem::unlink(int parentInodeNumber, string name) {
 
   int inodeNumber = parentEntries[entryIdx].inum;
 
-  for (int i = entryIdx; i < totalEntries - 1; i++) {
+  for (int i = entryIdx; i < totalEntries; i++) {
     dir_ent_t temp = parentEntries[i];
     parentEntries[i] = parentEntries[i + 1];
     parentEntries[i + 1] = temp;

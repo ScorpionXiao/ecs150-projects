@@ -32,7 +32,7 @@ int main(int argc, char *argv[]) {
 
     cout << "Inode bitmap" <<endl;
 
-    int inodeMapSize = UFS_BLOCK_SIZE;
+    int inodeMapSize = UFS_BLOCK_SIZE * super.inode_bitmap_len;
     unsigned char *inodeBitMap = new unsigned char[inodeMapSize];
     fileSystem->readInodeBitmap(&super, inodeBitMap);
 
@@ -42,11 +42,11 @@ int main(int argc, char *argv[]) {
 
     cout << endl << endl;
 
-    delete[] inodeBitMap;
+    
 
     cout << "Data bitmap" <<endl;
 
-    int dataMapSize = UFS_BLOCK_SIZE;
+    int dataMapSize = UFS_BLOCK_SIZE * super.data_bitmap_len;
     unsigned char *dataBitMap = new unsigned char[dataMapSize];
     fileSystem->readDataBitmap(&super, dataBitMap);
 
@@ -56,7 +56,7 @@ int main(int argc, char *argv[]) {
 
     cout << endl;
 
-
+    delete[] inodeBitMap;
     delete[] dataBitMap;
     delete fileSystem;
     delete disk;
