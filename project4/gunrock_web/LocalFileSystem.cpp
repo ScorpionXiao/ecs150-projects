@@ -335,7 +335,10 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
   memset(&newInode, 0, sizeof(inode_t));
   newInode.type = type;
   newInode.size = 0;
-  newInode.direct[0] = newDataBlockNumber + super.data_region_addr;
+  if (type == UFS_DIRECTORY) {
+    newInode.direct[0] = newDataBlockNumber + super.data_region_addr;
+  }
+
 
   if (type == UFS_DIRECTORY) {
     char dirBlock[UFS_BLOCK_SIZE];
@@ -512,10 +515,140 @@ int LocalFileSystem::unlink(int parentInodeNumber, string name) {
   super_t super;
   readSuperBlock(&super);
 
+  if (parentInodeNumber < 0) {
+    return -EINVALIDINODE;
+  }
+
   inode_t parentInode;
   if (stat(parentInodeNumber, &parentInode) < 0) {
     return -EINVALIDINODE;
   }
+
+  if (parentInodeNumber > super.num_inodes || parentInodeNumber < 0) {
+    return -EINVALIDINODE;
+  }
+
+  if (parentInode.type != UFS_DIRECTORY) {
+    return -EINVALIDTYPE;
+  }
+
+  if (parentInode.size < 96) {
+    return -EINVALIDINODE;
+  }
+
+  if (name.empty() || name.length() > DIR_ENT_NAME_SIZE) {
+    return -EINVALIDNAME;
+  }
+
+  if (strcmp(name.c_str(), ".") == 0 || strcmp(name.c_str(), "..") == 0) {
+    return -EUNLINKNOTALLOWED;
+  }
+
+  int dirBlocks = (parentInode.size + UFS_BLOCK_SIZE - 1) / UFS_BLOCK_SIZE;
+
+  char *parentDirBuffer = new char[dirBlocks * UFS_BLOCK_SIZE];
+  for (int i = 0; i < dirBlocks; i++) {
+    int bnumber = parentInode.direct[i];
+    disk->readBlock(bnumber, parentDirBuffer + (i * UFS_BLOCK_SIZE));
+  }
+
+  dir_ent_t *parentEntries = (dir_ent_t *)parentDirBuffer;
+
+  int entryIdx = -1;
+  int totalEntries = parentInode.size / sizeof(dir_ent_t);
+  for (int i = 0; i < totalEntries; i++) { 
+    if (strcmp(parentEntries[i].name, name.c_str()) == 0) {
+      entryIdx = i;
+      break;
+    }
+  }
+
+  if (entryIdx == -1) {
+    delete[] parentDirBuffer;
+    return 0;
+  }
+
+  inode_t inode;
+  if (stat(parentEntries[entryIdx].inum, &inode) < 0) {
+    delete[] parentDirBuffer;
+    return -EINVALIDINODE;
+  }
+
+  if (inode.type == UFS_DIRECTORY && inode.size > 64) {
+    delete[] parentDirBuffer;
+    return -EDIRNOTEMPTY;
+  }  
+
+  int inodeNumber = parentEntries[entryIdx].inum;
+
+  for (int i = entryIdx; i < totalEntries - 1; i++) {
+    dir_ent_t temp = parentEntries[i];
+    parentEntries[i] = parentEntries[i + 1];
+    parentEntries[i + 1] = temp;
+  }
+
+  int inodeMapSize = UFS_BLOCK_SIZE * super.inode_bitmap_len;
+  unsigned char *inodeBitMap = new unsigned char[inodeMapSize];
+  readInodeBitmap(&super, inodeBitMap);
+
+  int dataMapSize = UFS_BLOCK_SIZE * super.data_bitmap_len;
+  unsigned char *dataBitMap = new unsigned char[dataMapSize];
+  readDataBitmap(&super, dataBitMap);
+
+  if (inode.type == UFS_REGULAR_FILE) {
+    int blockCount = (inode.size + UFS_BLOCK_SIZE - 1) / UFS_BLOCK_SIZE;
+    for (int i = 0; i < blockCount; i++) {
+      int absoluteBlockNumber = inode.direct[i];
+      int relativeBlockNumber = absoluteBlockNumber - super.data_region_addr;
+
+      dataBitMap[relativeBlockNumber / 8] &= ~(1 << (relativeBlockNumber % 8));
+    }
+  } else {
+    // inode.type == UFS_DIRECTORY
+    int blockCount = (inode.size + UFS_BLOCK_SIZE - 1) / UFS_BLOCK_SIZE;
+    for (int i = 0; i < blockCount; i++) {
+      int absoluteBlockNumber = inode.direct[i];
+      int relativeBlockNumber = absoluteBlockNumber - super.data_region_addr;
+
+      dataBitMap[relativeBlockNumber / 8] &= ~(1 << (relativeBlockNumber % 8));
+    }
+  }
+
+  inodeBitMap[inodeNumber / 8] &= ~(1 << (inodeNumber % 8));
+
+
+  int originalBlockCount = (parentInode.size + UFS_BLOCK_SIZE - 1) / UFS_BLOCK_SIZE;
+  parentInode.size -= sizeof(dir_ent_t);
+  // block after unlink
+  int newBlockCount = (parentInode.size + UFS_BLOCK_SIZE - 1) / UFS_BLOCK_SIZE;
+  
+  if (newBlockCount < originalBlockCount) {
+    int absoluteBlockNumber = parentInode.direct[originalBlockCount - 1];
+    int relativeBlockNumber = absoluteBlockNumber - super.data_region_addr;
+
+    dataBitMap[relativeBlockNumber / 8] &= ~(1 << (relativeBlockNumber % 8));
+  }
+
+  for (int i = 0; i < newBlockCount; i++) {
+    disk->writeBlock(parentInode.direct[i], parentDirBuffer + (i * UFS_BLOCK_SIZE));
+  }
+  // disk->writeBlock(parentInode.direct[0], parentDirBlock);
+  // char buffer[UFS_BLOCK_SIZE];
+  // disk->readBlock(parentInode.direct[0], buffer);
+
+  inode_t *inodes = new inode_t[super.num_inodes];
+  readInodeRegion(&super, inodes);
+  inodes[parentInodeNumber] = parentInode;
+  writeInodeRegion(&super, inodes);
+
+  writeInodeBitmap(&super, inodeBitMap);
+  writeDataBitmap(&super, dataBitMap);
+
+
+  delete[] parentDirBuffer;
+  delete[] inodeBitMap;
+  delete[] dataBitMap;
+  delete[] inodes;
 
   return 0;
 }

@@ -17,12 +17,22 @@ int main(int argc, char *argv[]) {
   }
 
   // Parse command line arguments
-  /*
+
   Disk *disk = new Disk(argv[1], UFS_BLOCK_SIZE);
   LocalFileSystem *fileSystem = new LocalFileSystem(disk);
   int parentInode = stoi(argv[2]);
   string entryName = string(argv[3]);
-  */
 
+  int result = fileSystem->unlink(parentInode, entryName);
+
+  if (result < 0) {
+    delete disk;
+    delete fileSystem;
+    cerr << "Error removing entry" << endl;
+    return 1;
+  }
+
+  delete disk;
+  delete fileSystem;
   return 0;
 }
